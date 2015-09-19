@@ -13,8 +13,8 @@
 #define DELIM " \t\r\n"  //delimiters
 char start[100],cp[100],command[1000],cdpath[100];
 char* args[100];
-int argc;
-int shell_terminal=STDERR_FILENO,pnum,cnum;
+int argc,back=1,flag=0;
+int shell_terminal=STDERR_FILENO,pnum,cnum,inter;
 pid_t shell_pgid;
 typedef struct cnode{
 	char* arg[100];
@@ -22,7 +22,79 @@ typedef struct cnode{
 	char *in,*out;
 	struct cnode* next;
 }cnode;
+typedef struct pnode{
+	char name[100];
+	pid_t pid,pgid;
+	struct pnode* next;
+}pnode;
 cnode* commands=NULL;
+pnode* pq = NULL;
+void getprmpt();
+pnode* insp(pnode* head,char n[],pid_t id,pid_t gid){
+//	printf("INSP called\n");
+	pnode* tmp=(pnode*)malloc(sizeof(pnode));
+	strcpy(tmp->name,n);
+	tmp->pid=id;tmp->pgid=gid;
+	tmp->next=NULL;
+	if(head==NULL)return tmp;
+	pnode* r=head;
+	while(r->next!=NULL)r=r->next;
+	r->next=tmp;
+	return head;
+}
+pnode* deletep(pnode* head,pid_t id){
+	if(!head)return head;
+	pnode* tmp=head;
+	pnode* tmp2;
+	while(tmp!=NULL){
+		if(tmp->pid!=id){tmp2=tmp;tmp=tmp->next;}
+		else break;
+	}
+	if(tmp==NULL)return head;
+	if(tmp==head){
+//		printf("tmp=head\n");
+		head=head->next;
+		free(tmp);
+		return head;
+	}
+	else{
+		tmp2->next=tmp->next;
+		free(tmp);
+		return head;
+	}
+}
+pnode* search(pnode* head,pid_t id){
+	pnode* tmp=head;
+	while(tmp){
+		if(tmp->pid==id)return tmp;
+		else tmp=tmp->next;
+	}
+}
+pid_t search_id(pnode* head,int n){
+	int i=1;
+	pnode* tmp=head;
+	while(tmp){
+		if(i==n)return tmp->pid;
+		else{
+			i++;tmp=tmp->next;
+		}
+	}
+	if(!tmp)return -1;
+}
+void jobs(pnode* head){
+	pnode* tmp=head;
+	if(!tmp){
+		fprintf(stdout,"No background processes\n");return;
+	}
+	int i=1;
+	assert(tmp!=NULL);
+	while(tmp!=NULL){
+		assert(tmp!=NULL);
+		fprintf(stdout,"[%d] %s [%d]\n",i,head->name,head->pid);
+		i++;tmp=tmp->next;
+	}
+	return;
+}
 cnode* ins(cnode* root){
 	cnode* tmp=(cnode*)malloc(sizeof(cnode));
 	tmp->argc=argc;
@@ -38,12 +110,13 @@ cnode* ins(cnode* root){
 			tmp->argc--;
 			if(i==argc-1){
 				perror("No input file\n");
-				return root;
 			}
 			tmp->arg[i]=NULL;
 			tmp->argc--;
-			tmp->in=(char*)malloc(100*sizeof(char));
-			strcpy(tmp->in,args[i+1]);
+			if(i!=argc-1){
+				tmp->in=(char*)malloc(100*sizeof(char));
+				strcpy(tmp->in,args[i+1]);
+			}
 			//tmp->in=args[i+1]
 			i+=2;
 		}
@@ -51,13 +124,13 @@ cnode* ins(cnode* root){
 			tmp->argc--;
 			if(i==argc-1){
 				perror("No output file\n");
-				return root;
 			}
 			tmp->arg[i]=NULL;
 			tmp->argc--;
-			tmp->out=(char*)malloc(100*sizeof(char));
-			//tmp->out=args[i+1];
-			strcpy(tmp->out,args[i+1]);
+			if(i!=argc-1){
+				tmp->out=(char*)malloc(100*sizeof(char));
+				strcpy(tmp->out,args[i+1]);
+			}
 			i+=2;
 		}
 		else i++;
@@ -86,16 +159,51 @@ void run(cnode* r){
 	}
 }
 void init(){
+	shell_terminal=STDERR_FILENO;
+	back=0;
+	inter=isatty(shell_terminal);
 	getcwd(start,100);
-	/*shell_pgid=getpid();
-	  printf("shellid %d\n",shell_pgid);
-	  if(setpgid(shell_pgid,shell_pgid)<0)
-	  {
-	  perror("Can't make shell a member of it's own process group");
-	  _exit(1);
-	  }
-	  tcsetpgrp(shell_terminal,shell_pgid);
-	  printf("fgid %d\n",tcgetpgrp(shell_terminal));*/
+	if(inter){while (tcgetpgrp (shell_terminal) != (shell_pgid = getpgrp ()))
+		kill (- shell_pgid, SIGTTIN);
+	}
+	signal (SIGINT, SIG_IGN);
+	signal (SIGTSTP, SIG_IGN);
+	signal (SIGQUIT, SIG_IGN);
+	signal (SIGTTIN, SIG_IGN);
+	signal (SIGTTOU, SIG_IGN);
+	shell_pgid=getpid();
+	// printf("shellid %d\n",shell_pgid);
+	if(setpgid(shell_pgid,shell_pgid)<0)
+	{
+		perror("Can't make shell a member of it's own process group");
+		_exit(1);
+	}
+	tcsetpgrp(shell_terminal,shell_pgid);
+	//printf("fgidshell %d\n",tcgetpgrp(shell_terminal));
+}
+void handler(int sig){
+	if(sig==SIGINT)
+	{
+		fprintf(stderr,"\n");
+		getprmpt();
+	}
+	else if(sig==SIGCHLD){
+		int status;
+		pid_t pid;
+		while((pid=waitpid(-1,&status,WNOHANG))>0){
+			if(pid!=-1&&pid!=0){
+			if(WIFEXITED(status)){
+				pnode* pr=search(pq,pid);
+				if(pr){
+					fprintf(stdout,"%s with pid  %d exited normally",pr->name,pr->pid);
+					flag=1;
+					pq=deletep(pq,pid);
+				}
+			}
+			}
+		}
+	}
+	//fflush(stdout);
 }
 void freeargs(){
 	int i;
@@ -143,21 +251,21 @@ int pipeparse(char* maincomm){
 void getpath(int f){
 	getcwd(cp,100);
 	if(strstr(cp,start)==NULL){
-		printf("%s",cp);
+		fprintf(stderr,"%s",cp);
 	}
 	else{
 		int l =strlen(start);
-		printf("~%s",cp+l);
+		fprintf(stderr,"~%s",cp+l);
 	}
-	if(f)printf(">");
-	else printf("\n");
+	if(f)fprintf(stderr,">");
+	else fprintf(stderr,"\n");
 }
 void getprmpt(){
 	char name[100],host[100];
 	getlogin_r(name,100);
 	gethostname(host,100*sizeof(char));
 	getcwd(cp,100);
-	printf("%s@%s:",name,host);
+	fprintf(stderr,"%s@%s:",name,host);
 	getpath(1);
 }
 int cd(){
@@ -196,38 +304,50 @@ void execute(cnode* r){
 		return;
 	}
 	else if(strcmp(r->arg[0],"pwd")==0){getpath(0);fflush(stdout);return;}
-	//else if(strcmp(r->arg[0],"exit")==0||strcmp(r->arg[0],"quit")==0){fflush(stdout);ret
-	int status;
+	else if(strcmp(r->arg[0],"jobs")==0){
+		jobs(pq);
+		fflush(stdout);return;
+	}
 	pid_t pid=fork();
 	if(pid<0){
 		perror("Child not created\n");
 		_exit(-1);
 	}
 	if(pid==0){
-		//setpgid(0,0);
-		//setpgid(getpid(),getpid());
-		//printf("chpgpid %d\n",getpgid(getpid()));
-		//printf("chppid %d\n",getppid());
-		//printf("fgid %d\n",tcgetpgrp(shell_terminal));
-		//tcsetpgrp(shell_terminal,getpid());
-		/*if(execvp(r->arg[0],r->arg)!=0){
-			perror("Invalid command\n");
-		}*/
+		prctl(PR_SET_PDEATHSIG, SIGHUP);
+		setpgid(getpid(),getpid());
+		pid_t id=getpid();
+		//if(back)pq=insp(pq,command,id,id);
+		if(back==0)tcsetpgrp(shell_terminal,getpid());
+		signal (SIGINT, SIG_DFL);
+		signal (SIGQUIT, SIG_DFL);
+		signal (SIGTSTP, SIG_DFL);
+		signal (SIGTTIN, SIG_DFL);
+		signal (SIGTTOU, SIG_DFL);
+		signal (SIGCHLD, SIG_DFL);
 		run(r);
 		_exit(0);
 	}
-	//else tcsetpgrp(0,getpgrp());
-	wait(&status);
+	if(back==0){
+		int status;
+		tcsetpgrp(shell_terminal,pid);
+		waitpid(pid,&status,WUNTRACED);
+		if(WIFSTOPPED(status))
+			fprintf(stderr,"\n[%d]+ stopped",pid);
+		tcsetpgrp(shell_terminal,shell_pgid);
+	}
+	if(back)pq=insp(pq,command,pid,pid);
+	fflush(stdout);
 }
 void pipe_execute(cnode* head){
 	if(cnum==1){execute(commands);return;}
 	pnum=cnum-1;
-	pid_t pid[cnum+1];
+	pid_t pid[cnum+1],gid;
 	int pipes[pnum+1][2],i=0,j;
 	for(j=0;j<pnum+1;j++){
 		if(pipe(pipes[j])<0){
-				perror("pipe error\n");
-				return;
+			perror("pipe error\n");
+			return;
 		}
 	}
 	//print(head);
@@ -240,6 +360,9 @@ void pipe_execute(cnode* head){
 			return;
 		}
 		if(pid[i]==0){
+			gid=getpid();      //make first member as group leader
+			if(i==0)setpgid(gid,gid);
+			else setpgid(getpid(),gid);
 			if(i>0){
 				dup2(pipes[i-1][0],0);
 				if(i!=cnum-1)dup2(pipes[i][1],1);
@@ -252,28 +375,50 @@ void pipe_execute(cnode* head){
 				//for(j=0;j<pnum+1;j++){close(pipes[j][0]);close(pipes[j][1]);}
 				//run(head);
 			}
-		        for(j=0;j<pnum+1;j++){close(pipes[j][0]);close(pipes[j][1]);}
+			for(j=0;j<pnum+1;j++){close(pipes[j][0]);close(pipes[j][1]);}
 			run(head);
 		}
 		i++;
 		head=head->next;
 	}
 	for(j=0;j<pnum+1;j++){close(pipes[j][0]);close(pipes[j][1]);}
-	for(j=0;j<cnum;j++)waitpid(pid[j],NULL,0);
+	if(!back){
+		tcsetpgrp(shell_terminal,gid);
+		for(j=0;j<cnum;j++){
+			waitpid(pid[j],NULL,0);
+		}
+		tcsetpgrp(shell_terminal,shell_pgid);
+	}
 }
 int main(){
+	fflush(stdout);
 	init();
-	int i=1;
+	int i=1,c;
 	while(i){
+		if(signal(SIGINT,handler)==SIG_ERR){
+			perror("Signal error\n");
+		}
+		if(signal(SIGCHLD,handler)==SIG_ERR){
+			perror("Signal error\n");
+		}
+	        if(flag){printf("\n");flag=0;}
 		getprmpt();
 		scanf("%[^\n]",command);
+		//printf("%s\n",command);
+		if(strlen(command)>0){
+			if(command[strlen(command)-1]=='&'){
+				command[strlen(command)-1]='\0';
+				back=1;
+			}
+		}
 		cnum=pipeparse(command);
 		//print(commands);
 		if(cnum>0)if(strcmp(commands->arg[0],"exit")==0||strcmp(commands->arg[0],"quit")==0)break;
 		pipe_execute(commands);
-		fflush(stdout);
+		//fflush(stdout);
 		freec();
 		scanf("%*c");
+		back=0;
 		commands=NULL;
 		//i--;
 	}
