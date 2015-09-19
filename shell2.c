@@ -30,8 +30,9 @@ typedef struct pnode{
 cnode* commands=NULL;
 pnode* pq = NULL;
 void getprmpt();
+
 pnode* insp(pnode* head,char n[],pid_t id,pid_t gid){
-//	printf("INSP called\n");
+	//	printf("INSP called\n");
 	pnode* tmp=(pnode*)malloc(sizeof(pnode));
 	strcpy(tmp->name,n);
 	tmp->pid=id;tmp->pgid=gid;
@@ -42,6 +43,7 @@ pnode* insp(pnode* head,char n[],pid_t id,pid_t gid){
 	r->next=tmp;
 	return head;
 }
+
 pnode* deletep(pnode* head,pid_t id){
 	if(!head)return head;
 	pnode* tmp=head;
@@ -52,7 +54,7 @@ pnode* deletep(pnode* head,pid_t id){
 	}
 	if(tmp==NULL)return head;
 	if(tmp==head){
-//		printf("tmp=head\n");
+		//		printf("tmp=head\n");
 		head=head->next;
 		free(tmp);
 		return head;
@@ -63,6 +65,7 @@ pnode* deletep(pnode* head,pid_t id){
 		return head;
 	}
 }
+
 pnode* search(pnode* head,pid_t id){
 	pnode* tmp=head;
 	while(tmp){
@@ -81,6 +84,7 @@ pid_t search_id(pnode* head,int n){
 	}
 	if(!tmp)return -1;
 }
+
 void jobs(pnode* head){
 	pnode* tmp=head;
 	if(!tmp){
@@ -90,10 +94,43 @@ void jobs(pnode* head){
 	assert(tmp!=NULL);
 	while(tmp!=NULL){
 		assert(tmp!=NULL);
-		fprintf(stdout,"[%d] %s [%d]\n",i,head->name,head->pid);
+		fprintf(stdout,"[%d] %s [%d]\n",i,tmp->name,tmp->pid);
 		i++;tmp=tmp->next;
 	}
 	return;
+}
+void kjob(int n,int sig){
+	pid_t id=search_id(pq,n);
+	if(id==-1){fprintf(stderr,"job not found\n");return;}
+	pid_t gid=getpgid(id);
+	if(killpg(gid,sig)<0)perror("Error sending signal\n");
+	else fprintf(stderr,"signal sent\n");
+}
+void overkill(pnode* r){
+	int i=1;
+	pnode* tmp=r;
+	while(tmp){
+		kjob(i,9);
+		tmp=tmp->next;i++;
+	}
+	return;
+}
+void fg(int n){
+	pid_t id;
+	id=search_id(pq,n);
+	if(id==-1){
+		fprintf(stderr,"No such job\n");return;
+	}
+	pnode* p=search(pq,id);
+	fprintf(stderr,"%s\n",p->name);
+	pid_t gid=getpgid(id);
+	int st;
+	tcsetpgrp(shell_terminal,gid);
+	if(killpg(gid,SIGCONT<0))perror("Unable to continue\n");
+	waitpid(id,&st,WUNTRACED);
+	if(!WIFSTOPPED(st))pq=deletep(pq,id);
+	else fprintf(stderr,"Stopped\n");
+	tcsetpgrp(shell_terminal,shell_pgid);
 }
 cnode* ins(cnode* root){
 	cnode* tmp=(cnode*)malloc(sizeof(cnode));
@@ -192,14 +229,21 @@ void handler(int sig){
 		pid_t pid;
 		while((pid=waitpid(-1,&status,WNOHANG))>0){
 			if(pid!=-1&&pid!=0){
-			if(WIFEXITED(status)){
-				pnode* pr=search(pq,pid);
-				if(pr){
-					fprintf(stdout,"%s with pid  %d exited normally",pr->name,pr->pid);
-					flag=1;
-					pq=deletep(pq,pid);
+				if(WIFEXITED(status)){
+					pnode* pr=search(pq,pid);
+					if(pr){
+						fprintf(stdout,"%s with pid  %d exited normally  ",pr->name,pr->pid);
+						flag=1;
+						pq=deletep(pq,pid);
+					}
 				}
-			}
+				else if(WIFSIGNALED(status)){
+					pnode* pr=search(pq,pid);
+					if(pr){
+						fprintf(stdout,"%s with pid %d signalled to kill  ",pr->name,pr->pid);flag=1;
+						pq=deletep(pq,pid);
+					}
+				}
 			}
 		}
 	}
@@ -303,6 +347,23 @@ void execute(cnode* r){
 		fflush(stdout);
 		return;
 	}
+	else if(strcmp(r->arg[0],"kjob")==0){
+		if(r->argc!=3){
+			fprintf(stderr,"Wrong no. of arguements\n");return;
+		}
+		kjob(atoi(r->arg[1]),atoi(r->arg[2]));fflush(stdout);return;
+	}
+	else if(strcmp(r->arg[0],"overkill")==0){overkill(pq);return;}
+	else if(strcmp(r->arg[0],"fg")==0){
+		if(r->argc==1){
+			fprintf(stderr,"Process No. required\n");return;
+		}
+		else if(r->argc>2){
+			fprintf(stderr,"Takes only one arguement\n");return;
+		}
+		fg(atoi(r->arg[1]));
+		fflush(stdout);return;
+	}
 	else if(strcmp(r->arg[0],"pwd")==0){getpath(0);fflush(stdout);return;}
 	else if(strcmp(r->arg[0],"jobs")==0){
 		jobs(pq);
@@ -336,7 +397,10 @@ void execute(cnode* r){
 			fprintf(stderr,"\n[%d]+ stopped",pid);
 		tcsetpgrp(shell_terminal,shell_pgid);
 	}
-	if(back)pq=insp(pq,command,pid,pid);
+	if(back){
+		printf("p: %s\n",command);
+		pq=insp(pq,command,pid,pid);
+	}
 	fflush(stdout);
 }
 void pipe_execute(cnode* head){
@@ -401,7 +465,7 @@ int main(){
 		if(signal(SIGCHLD,handler)==SIG_ERR){
 			perror("Signal error\n");
 		}
-	        if(flag){printf("\n");flag=0;}
+		if(flag){printf("\n");flag=0;}
 		getprmpt();
 		scanf("%[^\n]",command);
 		//printf("%s\n",command);
