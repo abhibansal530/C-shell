@@ -129,7 +129,7 @@ void fg(int n){
 	if(killpg(gid,SIGCONT<0))perror("Unable to continue\n");
 	waitpid(id,&st,WUNTRACED);
 	if(!WIFSTOPPED(st))pq=deletep(pq,id);
-	else fprintf(stderr,"Stopped\n");
+	else fprintf(stderr,"[%d]+ Stopped %s\n",id,(search(pq,id))->name);
 	tcsetpgrp(shell_terminal,shell_pgid);
 }
 cnode* ins(cnode* root){
@@ -393,8 +393,13 @@ void execute(cnode* r){
 		int status;
 		tcsetpgrp(shell_terminal,pid);
 		waitpid(pid,&status,WUNTRACED);
-		if(WIFSTOPPED(status))
+		if(WIFSTOPPED(status)){
+			pq=insp(pq,command,pid,pid);
 			fprintf(stderr,"\n[%d]+ stopped",pid);
+		}
+		else{
+			pq=deletep(pq,pid);
+		}
 		tcsetpgrp(shell_terminal,shell_pgid);
 	}
 	if(back){
