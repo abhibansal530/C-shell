@@ -5,7 +5,6 @@
 #include<sys/types.h>
 #include<fcntl.h>
 #include<stdio.h>
-#include <sys/prctl.h>
 #include<stdlib.h>
 #include<string.h>
 #include<sys/wait.h>
@@ -220,11 +219,7 @@ void run(cnode* r){
 void init(){
 	shell_terminal=STDERR_FILENO;
 	back=0;
-	inter=isatty(shell_terminal);
 	getcwd(start,100);
-	if(inter){while (tcgetpgrp (shell_terminal) != (shell_pgid = getpgrp ()))
-		kill (- shell_pgid, SIGTTIN);
-	}
 	signal (SIGINT, SIG_IGN);
 	signal (SIGTSTP, SIG_IGN);
 	signal (SIGQUIT, SIG_IGN);
@@ -316,15 +311,17 @@ int pipeparse(char* maincomm){
 }
 void getpath(int f){
 	getcwd(cp,100);
-	if(strstr(cp,start)==NULL){
-		fprintf(stderr,"%s",cp);
+	if(f){
+		if(strstr(cp,start)==NULL){
+			fprintf(stderr,"%s",cp);
+		}
+		else{
+			int l =strlen(start);
+			fprintf(stderr,"~%s",cp+l);
+		}
+		fprintf(stderr,">");
 	}
-	else{
-		int l =strlen(start);
-		fprintf(stderr,"~%s",cp+l);
-	}
-	if(f)fprintf(stderr,">");
-	else fprintf(stderr,"\n");
+	else fprintf(stderr,"%s\n",cp);
 }
 void getprmpt(){
 	char name[100],host[100];
@@ -405,7 +402,6 @@ void execute(cnode* r){
 		_exit(-1);
 	}
 	if(pid==0){
-		prctl(PR_SET_PDEATHSIG, SIGHUP);
 		setpgid(getpid(),getpid());
 		pid_t id=getpid();
 		//if(back)pq=insp(pq,command,id,id);
@@ -433,7 +429,6 @@ void execute(cnode* r){
 		tcsetpgrp(shell_terminal,shell_pgid);
 	}
 	if(back){
-		printf("p: %s\n",command);
 		pq=insp(pq,command,pid,pid);
 	}
 	fflush(stdout);
@@ -449,10 +444,7 @@ void pipe_execute(cnode* head){
 			return;
 		}
 	}
-	//print(head);
-	//print(head->next);
 	while(head!=NULL&&i<cnum){
-		//print(head);
 		pid[i]=fork();
 		if(pid[i]<0){
 			perror("Child process error\n");
@@ -465,14 +457,10 @@ void pipe_execute(cnode* head){
 			if(i>0){
 				dup2(pipes[i-1][0],0);
 				if(i!=cnum-1)dup2(pipes[i][1],1);
-				//for(j=0;j<pnum+1;j++){close(pipes[j][0]);close(pipes[j][1]);}
-				//run(head);
 
 			}
 			else{
 				dup2(pipes[0][1],1);
-				//for(j=0;j<pnum+1;j++){close(pipes[j][0]);close(pipes[j][1]);}
-				//run(head);
 			}
 			for(j=0;j<pnum+1;j++){close(pipes[j][0]);close(pipes[j][1]);}
 			run(head);
@@ -503,7 +491,6 @@ int main(){
 		if(flag){printf("\n");flag=0;}
 		getprmpt();
 		scanf("%[^\n]",command);
-		//printf("%s\n",command);
 		if(strlen(command)>0){
 			if(command[strlen(command)-1]=='&'){
 				command[strlen(command)-1]='\0';
@@ -511,10 +498,8 @@ int main(){
 			}
 		}
 		cnum=pipeparse(command);
-		//print(commands);
 		if(cnum>0)if(strcmp(commands->arg[0],"exit")==0||strcmp(commands->arg[0],"quit")==0)break;
 		pipe_execute(commands);
-		//fflush(stdout);
 		freec();
 		scanf("%*c");
 		back=0;
