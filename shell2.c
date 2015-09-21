@@ -451,6 +451,12 @@ void pipe_execute(cnode* head){
 			return;
 		}
 		if(pid[i]==0){
+			signal (SIGINT, SIG_DFL);
+			signal (SIGQUIT, SIG_DFL);
+			signal (SIGTSTP, SIG_DFL);
+			signal (SIGTTIN, SIG_DFL);
+			signal (SIGTTOU, SIG_DFL);
+			signal (SIGCHLD, SIG_DFL);
 			gid=getpid();      //make first member as group leader
 			if(i==0)setpgid(gid,gid);
 			else setpgid(getpid(),gid);
