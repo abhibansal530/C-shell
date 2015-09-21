@@ -132,6 +132,28 @@ void fg(int n){
 	else fprintf(stderr,"[%d]+ Stopped %s\n",id,(search(pq,id))->name);
 	tcsetpgrp(shell_terminal,shell_pgid);
 }
+void pinfo(pid_t pid){
+	char path[300],state[50],id[50],vm[50],expath[300],exname[100];
+	char* tok;
+	FILE *f;
+	sprintf(path,"/proc/%d/status",pid);
+	sprintf(expath,"/proc/%d/exe",pid);
+	if(f=fopen(path,"r")){
+		fscanf(f,"%*[^\n] %[^\n] %*[^\n] %*[^\n] %[^\n] %*[^\n] %*[^\n] %*[^\n] %*[^\n] %*[^\n] %*[^\n] %*[^\n] %[^\n]",state,id,vm);
+		tok=strtok(id,DELIM);
+		tok=strtok(NULL,DELIM);
+		printf("pid -- %s\n",tok);
+		tok=strtok(state,DELIM);
+		tok=strtok(NULL,DELIM);
+		printf("Process Status -- {%s} memory\n",tok);
+		tok=strtok(vm,DELIM);tok=strtok(NULL,DELIM);
+		printf("-- %s {Virtual Memory}\n",tok);
+		readlink(expath,exname,100);
+		printf("Executable Path -- %s\n",exname);
+	}
+	else
+		perror("No such process\n");
+}
 cnode* ins(cnode* root){
 	cnode* tmp=(cnode*)malloc(sizeof(cnode));
 	tmp->argc=argc;
@@ -346,6 +368,14 @@ void execute(cnode* r){
 		}
 		fflush(stdout);
 		return;
+	}
+	else if(strcmp(r->arg[0],"pinfo")==0){
+		if(argc==1){
+			pid_t id=getpid();
+			pinfo(id);
+		}
+		else pinfo(atoi(r->arg[1]));
+		fflush(stdout);return;
 	}
 	else if(strcmp(r->arg[0],"kjob")==0){
 		if(r->argc!=3){
